@@ -1,12 +1,17 @@
-import React, { useContext, useEffect, useRef, useState } from 'react';
+import React, { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import AnalyticsCard from '../components/AnalyticsCard';
 import ChatPanel from '../components/ChatPanel';
+import ConfusionRadar from '../components/ConfusionRadar';
 import Leaderboard from '../components/Leaderboard';
 import Navbar from '../components/Navbar';
 import PollModal from '../components/PollModal';
+import RewindAssistant from '../components/RewindAssistant';
+import SilentDoubtPanel from '../components/SilentDoubtPanel';
 import VideoGrid from '../components/VideoGrid';
 import { AuthContext } from '../context/AuthContext';
+import server from '../environment';
+import io from 'socket.io-client';
 
 const attendanceTrend = [68, 74, 80, 84, 81, 88, 92, 89];
 
@@ -22,10 +27,23 @@ const normalizeRoomCode = (value = '') => value.toUpperCase().replace(/[^A-Z0-9]
 const Classroom = () => {
   const navigate = useNavigate();
   const { id = 'live' } = useParams();
-  const { addToUserHistory, userData } = useContext(AuthContext);
+  const {
+    addToUserHistory,
+    addRecordingMeta,
+    getRecordingsByMeetingCode,
+    userData,
+  } = useContext(AuthContext);
   const userRole = localStorage.getItem('role') || '';
   const studentRoomAccess = sessionStorage.getItem('student-room-access') || '';
-  const studentAccessAllowed = userRole !== 'student' || normalizeRoomCode(studentRoomAccess) === normalizeRoomCode(id);
+  const teacherRoomAccess = sessionStorage.getItem('teacher-room-access') || '';
+  const isStudent = userRole === 'student';
+  const isTeacher = userRole === 'teacher';
+  const normalizedClassId = normalizeRoomCode(id);
+  const hasClassroomAccess = isStudent
+    ? normalizeRoomCode(studentRoomAccess) === normalizedClassId
+    : isTeacher
+      ? normalizeRoomCode(teacherRoomAccess) === normalizedClassId
+      : true;
   const trackedRoomsRef = useRef(new Set());
   const localStreamRef = useRef(null);
   const screenStreamRef = useRef(null);
@@ -34,6 +52,8 @@ const Classroom = () => {
   const manualRecognitionStopRef = useRef(false);
   const micOnRef = useRef(true);
   const mediaReadyRef = useRef(false);
+  const socketRef = useRef(null);
+  const recordingStartRef = useRef(0);
 
   const [micOn, setMicOn] = useState(true);
   const [camOn, setCamOn] = useState(true);
@@ -49,6 +69,20 @@ const Classroom = () => {
   const [transcriptError, setTranscriptError] = useState('');
   const [interimTranscript, setInterimTranscript] = useState('');
   const [transcriptLines, setTranscriptLines] = useState([]);
+  const [participants, setParticipants] = useState([]);
+  const [groupedDoubts, setGroupedDoubts] = useState([]);
+  const [doubtText, setDoubtText] = useState('');
+  const [sendingDoubt, setSendingDoubt] = useState(false);
+  const [heatmap, setHeatmap] = useState({});
+  const [rewindLoading, setRewindLoading] = useState(false);
+  const [rewindExplanation, setRewindExplanation] = useState('');
+  const [rewindTranscript, setRewindTranscript] = useState('');
+  const [insightLoading, setInsightLoading] = useState(false);
+  const [insight, setInsight] = useState('');
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingMessage, setRecordingMessage] = useState('');
+  const [recordings, setRecordings] = useState([]);
+  const [activeTeachingStep, setActiveTeachingStep] = useState(0);
 
   const stopTracks = (stream) => {
     if (!stream) return;
@@ -56,15 +90,15 @@ const Classroom = () => {
   };
 
   useEffect(() => {
-    if (studentAccessAllowed) {
+    if (hasClassroomAccess) {
       return;
     }
 
-    navigate('/student', { replace: true });
-  }, [navigate, studentAccessAllowed]);
+    navigate(isTeacher ? '/teacher' : '/student', { replace: true });
+  }, [navigate, hasClassroomAccess, isTeacher]);
 
   useEffect(() => {
-    if (!studentAccessAllowed) {
+    if (!hasClassroomAccess) {
       return;
     }
 
@@ -76,7 +110,86 @@ const Classroom = () => {
     addToUserHistory(id).catch(() => {
       // Keep classroom flow available even if activity API is unavailable.
     });
-  }, [id, addToUserHistory, studentAccessAllowed]);
+
+    getRecordingsByMeetingCode(id)
+      .then((response) => {
+        setRecordings(Array.isArray(response) ? response : []);
+      })
+      .catch(() => {
+        setRecordings([]);
+      });
+  }, [id, addToUserHistory, hasClassroomAccess]);
+
+  useEffect(() => {
+    if (!hasClassroomAccess) {
+      return undefined;
+    }
+
+    const socket = io(server, {
+      withCredentials: true,
+      transports: ['websocket'],
+    });
+
+    socketRef.current = socket;
+
+    socket.on('connect', () => {
+      socket.emit('join-classroom', {
+        roomCode: id,
+        roomId: id,
+        path: `classroom:${id}`,
+        role: isTeacher ? 'teacher' : 'student',
+        name: userData?.username || localStorage.getItem('username') || (isTeacher ? 'Teacher' : 'Student'),
+      });
+
+      socket.emit('request-room-snapshot', {
+        roomCode: id,
+        roomId: id,
+        path: `classroom:${id}`,
+      });
+    });
+
+    socket.on('participants-update', (payload = []) => {
+      setParticipants(Array.isArray(payload) ? payload : []);
+    });
+
+    socket.on('grouped-doubts', (payload = []) => {
+      setGroupedDoubts(Array.isArray(payload) ? payload : []);
+    });
+
+    socket.on('update-heatmap', (payload = {}) => {
+      setHeatmap(payload || {});
+    });
+
+    socket.on('rewind-response', (payload = {}) => {
+      setRewindLoading(false);
+      setRewindExplanation(payload?.explanation || 'No explanation received');
+      setRewindTranscript(payload?.transcript || '');
+    });
+
+    socket.on('insight-response', (payload = {}) => {
+      setInsightLoading(false);
+      setInsight(payload?.insight || 'No insight generated yet.');
+    });
+
+    return () => {
+      socket.disconnect();
+      socketRef.current = null;
+    };
+  }, [hasClassroomAccess, id, isTeacher, userData?.username]);
+
+  useEffect(() => {
+    if (!isTeacher || teachingFlowSteps.length === 0) {
+      return undefined;
+    }
+
+    setActiveTeachingStep((previous) => previous % teachingFlowSteps.length);
+
+    const intervalId = setInterval(() => {
+      setActiveTeachingStep((previous) => (previous + 1) % teachingFlowSteps.length);
+    }, 3800);
+
+    return () => clearInterval(intervalId);
+  }, [isTeacher, teachingFlowSteps.length]);
 
   useEffect(() => {
     micOnRef.current = micOn;
@@ -87,7 +200,7 @@ const Classroom = () => {
   }, [mediaReady]);
 
   useEffect(() => {
-    if (!studentAccessAllowed) {
+    if (!hasClassroomAccess) {
       return undefined;
     }
 
@@ -155,10 +268,10 @@ const Classroom = () => {
       screenStreamRef.current = null;
       localStreamRef.current = null;
     };
-  }, [studentAccessAllowed]);
+  }, [hasClassroomAccess]);
 
   useEffect(() => {
-    if (!studentAccessAllowed) {
+    if (!hasClassroomAccess) {
       return undefined;
     }
 
@@ -203,6 +316,19 @@ const Classroom = () => {
 
       if (finalSegments.length > 0) {
         setTranscriptLines((previous) => [...previous, ...finalSegments].slice(-12));
+
+        if (socketRef.current?.connected) {
+          finalSegments.forEach((line) => {
+            socketRef.current.emit('transcript-line', {
+              roomCode: id,
+              roomId: id,
+              path: `classroom:${id}`,
+              text: line,
+              speaker: userData?.username || (isTeacher ? 'Teacher' : 'Student'),
+              timestamp: Date.now(),
+            });
+          });
+        }
       }
 
       setInterimTranscript(interim);
@@ -253,7 +379,7 @@ const Classroom = () => {
       speechRecognitionRef.current = null;
       recognitionRunningRef.current = false;
     };
-  }, [studentAccessAllowed]);
+  }, [hasClassroomAccess]);
 
   useEffect(() => {
     if (!isTranscriptSupported || !speechRecognitionRef.current) {
@@ -346,12 +472,168 @@ const Classroom = () => {
   };
 
   const engagement = 84;
-  const activeStudents = 24;
-  const inactiveStudents = 6;
+  const activeStudents = participants.filter((item) => item.role === 'student').length;
+  const inactiveStudents = Math.max(0, 30 - activeStudents);
+
+  const teachingFlowSteps = useMemo(() => {
+    const currentTopic = latestPoll?.question
+      || transcriptLines[transcriptLines.length - 1]
+      || `Core concept from session ${(id || 'live-room').toUpperCase()}`;
+
+    const strongestDoubt = groupedDoubts[0]
+      ? `${groupedDoubts[0].text} (${groupedDoubts[0].count || 1} students)`
+      : 'No high-volume doubt cluster yet. Trigger quick checks for understanding.';
+
+    const transcriptSnippet = transcriptLines.slice(-2).join(' ').trim()
+      || 'No finalized transcript segment yet. Speak short checkpoints and ask students to paraphrase.';
+
+    const insightPreview = insight
+      ? insight.slice(0, 180)
+      : 'Request confusion insight after a few student responses to target weak areas.';
+
+    return [
+      {
+        title: 'Topic Warmup',
+        detail: `Start with this focus topic: ${currentTopic}`,
+      },
+      {
+        title: 'Address Top Doubt',
+        detail: `Resolve the strongest confusion point: ${strongestDoubt}`,
+      },
+      {
+        title: 'Guided Explanation',
+        detail: `Build the explanation around this recent context: ${transcriptSnippet}`,
+      },
+      {
+        title: 'AI Insight Recap',
+        detail: `Close with adaptive recap based on radar insight: ${insightPreview}`,
+      },
+    ];
+  }, [id, latestPoll?.question, groupedDoubts, transcriptLines, insight]);
+
+  const submitDoubt = () => {
+    if (!isStudent) {
+      return;
+    }
+
+    const text = doubtText.trim();
+    if (!text || !socketRef.current?.connected) {
+      return;
+    }
+
+    setSendingDoubt(true);
+    socketRef.current.emit('new-doubt', {
+      roomCode: id,
+      roomId: id,
+      path: `classroom:${id}`,
+      text,
+      timestamp: Date.now(),
+    });
+
+    setDoubtText('');
+    setTimeout(() => {
+      setSendingDoubt(false);
+    }, 300);
+  };
+
+  const emitConfusion = () => {
+    if (!isStudent) {
+      return;
+    }
+
+    if (!socketRef.current?.connected) {
+      return;
+    }
+
+    socketRef.current.emit('confusion', {
+      roomCode: id,
+      roomId: id,
+      path: `classroom:${id}`,
+      timestamp: Date.now(),
+    });
+  };
+
+  const requestRewind = () => {
+    if (!isStudent) {
+      return;
+    }
+
+    if (!socketRef.current?.connected) {
+      return;
+    }
+
+    setRewindLoading(true);
+    socketRef.current.emit('rewind-request', {
+      roomCode: id,
+      roomId: id,
+      path: `classroom:${id}`,
+      timestamp: Date.now(),
+    });
+  };
+
+  const requestInsight = () => {
+    if (!isStudent) {
+      return;
+    }
+
+    if (!socketRef.current?.connected) {
+      return;
+    }
+
+    setInsightLoading(true);
+    socketRef.current.emit('insight-request', {
+      roomCode: id,
+      roomId: id,
+      path: `classroom:${id}`,
+    });
+  };
+
+  const toggleRecording = async () => {
+    if (!isTeacher) {
+      setRecordingMessage('Only teachers can record this classroom.');
+      return;
+    }
+
+    if (!isRecording) {
+      recordingStartRef.current = Date.now();
+      setIsRecording(true);
+      setRecordingMessage('Recording started. This is metadata capture prototype mode.');
+      return;
+    }
+
+    const durationSec = Math.max(1, Math.floor((Date.now() - recordingStartRef.current) / 1000));
+    const fakeSizeBytes = durationSec * 42000;
+    const fileName = `recording-${id}-${Date.now()}.webm`;
+
+    try {
+      await addRecordingMeta({
+        meetingCode: id,
+        durationSec,
+        sizeBytes: fakeSizeBytes,
+        fileName,
+      });
+
+      const latest = await getRecordingsByMeetingCode(id);
+      setRecordings(Array.isArray(latest) ? latest : []);
+      setRecordingMessage('Recording stopped and metadata saved.');
+    } catch {
+      setRecordingMessage('Could not save recording metadata right now.');
+    } finally {
+      setIsRecording(false);
+      recordingStartRef.current = 0;
+    }
+  };
+
   const handleLeaveClass = () => {
-    if (userRole === 'student') {
+    if (isStudent) {
       sessionStorage.removeItem('student-room-access');
       navigate('/student');
+      return;
+    }
+
+    if (isTeacher) {
+      sessionStorage.removeItem('teacher-room-access');
+      navigate('/teacher');
       return;
     }
 
@@ -366,8 +648,11 @@ const Classroom = () => {
         <main className='w-full flex-1 space-y-4 p-4'>
           <VideoGrid
             sessionTitle={`Classroom ${id.toUpperCase()}`}
-            teacherName={userData?.username || localStorage.getItem('username') || 'Teacher'}
-            teacherStream={shareOn && screenStream ? screenStream : camOn ? localStream : null}
+            teacherName={isTeacher ? (userData?.username || localStorage.getItem('username') || 'Teacher') : 'Teacher'}
+            teacherStream={isTeacher ? (shareOn && screenStream ? screenStream : camOn ? localStream : null) : null}
+            studentStream={!isTeacher && camOn ? localStream : null}
+            studentName={userData?.username || localStorage.getItem('username') || 'Student'}
+            viewerRole={isTeacher ? 'teacher' : 'student'}
             isScreenSharing={shareOn}
             isCameraOn={camOn}
             mediaError={mediaError}
@@ -464,6 +749,132 @@ const Classroom = () => {
             </div>
           </section>
 
+          {isStudent ? (
+            <section className='grid gap-4 xl:grid-cols-2'>
+              <SilentDoubtPanel
+                doubtText={doubtText}
+                onDoubtTextChange={setDoubtText}
+                onSubmitDoubt={submitDoubt}
+                submitting={sendingDoubt}
+                groupedDoubts={groupedDoubts}
+              />
+
+              <div className='space-y-4'>
+                <ConfusionRadar
+                  heatmap={heatmap}
+                  onConfused={emitConfusion}
+                  onInsight={requestInsight}
+                  insight={insight}
+                  loadingInsight={insightLoading}
+                />
+                <RewindAssistant
+                  onExplain={requestRewind}
+                  loading={rewindLoading}
+                  explanation={rewindExplanation}
+                  transcript={rewindTranscript}
+                />
+              </div>
+            </section>
+          ) : null}
+
+          {isTeacher ? (
+            <section className='glass-card p-4'>
+              <div className='mb-3 flex items-center justify-between'>
+                <div>
+                  <p className='text-xs uppercase tracking-[0.2em] text-slate-400'>Teaching Assistant</p>
+                  <h3 className='font-display text-lg text-white'>Animated Explanation Flow</h3>
+                </div>
+                <span className='rounded-full bg-brand-500/20 px-3 py-1 text-xs font-semibold text-brand-100'>
+                  Live Guidance
+                </span>
+              </div>
+
+              <div className='space-y-3'>
+                {teachingFlowSteps.map((step, index) => {
+                  const isActiveStep = index === activeTeachingStep;
+
+                  return (
+                    <article
+                      key={step.title}
+                      className={`rounded-xl border p-3 transition-all duration-500 ${
+                        isActiveStep
+                          ? 'border-brand-300/40 bg-brand-500/10 shadow-soft'
+                          : 'border-white/10 bg-white/5 opacity-80'
+                      }`}
+                    >
+                      <div className='flex items-center gap-3'>
+                        <span
+                          className={`inline-flex h-7 w-7 items-center justify-center rounded-full text-xs font-semibold ${
+                            isActiveStep
+                              ? 'bg-brand-500 text-white animate-pulse'
+                              : 'bg-slate-800 text-slate-300'
+                          }`}
+                        >
+                          {index + 1}
+                        </span>
+                        <h4 className='font-semibold text-slate-100'>{step.title}</h4>
+                      </div>
+                      <p className='mt-2 text-sm text-slate-300'>{step.detail}</p>
+                      <div className='mt-2 h-1 overflow-hidden rounded-full bg-slate-800'>
+                        <div
+                          className={`h-full rounded-full bg-gradient-to-r from-brand-400 to-cyan-300 transition-all duration-700 ${
+                            isActiveStep ? 'w-full' : 'w-0'
+                          }`}
+                        />
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            </section>
+          ) : null}
+
+          {isTeacher ? (
+            <section className='glass-card p-4'>
+            <div className='mb-3 flex flex-wrap items-center justify-between gap-2'>
+              <div>
+                <p className='text-xs uppercase tracking-[0.2em] text-slate-400'>Classroom Recording</p>
+                <h3 className='font-display text-lg text-white'>Teacher Recording Controls</h3>
+              </div>
+              <button
+                type='button'
+                onClick={toggleRecording}
+                className={`rounded-xl px-4 py-2 text-sm font-semibold ${
+                  isRecording ? 'bg-rose-500 text-white hover:bg-rose-400' : 'bg-brand-500 text-white hover:bg-brand-400'
+                }`}
+              >
+                {isRecording ? 'Stop Recording' : 'Start Recording'}
+              </button>
+            </div>
+
+            {recordingMessage ? (
+              <p className='mb-3 rounded-xl border border-amber-300/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-100'>
+                {recordingMessage}
+              </p>
+            ) : null}
+
+            <div className='space-y-2'>
+              {recordings.length === 0 ? (
+                <p className='rounded-xl border border-white/10 bg-white/5 p-3 text-sm text-slate-300'>
+                  No recording metadata found for this classroom yet.
+                </p>
+              ) : (
+                recordings.slice(0, 5).map((recording) => (
+                  <div
+                    key={recording._id}
+                    className='flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/10 bg-white/5 p-3 text-sm text-slate-200'
+                  >
+                    <span>{recording.fileName || 'session-recording.webm'}</span>
+                    <span className='text-xs text-slate-400'>
+                      {recording.durationSec}s | {(Number(recording.sizeBytes || 0) / 1024).toFixed(1)} KB
+                    </span>
+                  </div>
+                ))
+              )}
+            </div>
+            </section>
+          ) : null}
+
           <Leaderboard title='Class Participation Rankings' />
 
           {latestPoll && (
@@ -512,13 +923,44 @@ const Classroom = () => {
           >
             {shareOn ? 'Sharing Screen' : 'Share Screen'}
           </button>
-          <button
-            type='button'
-            onClick={() => setPollOpen(true)}
-            className='rounded-xl bg-brand-500 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-400'
-          >
-            Start Poll
-          </button>
+          {isTeacher ? (
+            <button
+              type='button'
+              onClick={() => setPollOpen(true)}
+              className='rounded-xl bg-brand-500 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-400'
+            >
+              Start Poll
+            </button>
+          ) : null}
+          {isStudent ? (
+            <button
+              type='button'
+              onClick={emitConfusion}
+              className='rounded-xl bg-amber-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-amber-400'
+            >
+              I&apos;m Confused
+            </button>
+          ) : null}
+          {isStudent ? (
+            <button
+              type='button'
+              onClick={requestRewind}
+              className='rounded-xl bg-white/10 px-4 py-2 text-sm font-semibold text-slate-100 hover:bg-white/20'
+            >
+              Explain Last 2 Minutes
+            </button>
+          ) : null}
+          {isTeacher ? (
+            <button
+              type='button'
+              onClick={toggleRecording}
+              className={`rounded-xl px-4 py-2 text-sm font-semibold ${
+                isRecording ? 'bg-rose-500 text-white hover:bg-rose-400' : 'bg-emerald-500 text-slate-950 hover:bg-emerald-400'
+              }`}
+            >
+              {isRecording ? 'Stop Recording' : 'Record Class'}
+            </button>
+          ) : null}
           <button
             type='button'
             onClick={handleLeaveClass}
@@ -529,7 +971,9 @@ const Classroom = () => {
         </div>
       </footer>
 
-      <PollModal open={pollOpen} onClose={() => setPollOpen(false)} onStart={setLatestPoll} />
+      {isTeacher ? (
+        <PollModal open={pollOpen} onClose={() => setPollOpen(false)} onStart={setLatestPoll} />
+      ) : null}
     </div>
   );
 };

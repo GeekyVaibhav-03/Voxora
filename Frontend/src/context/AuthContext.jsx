@@ -61,6 +61,13 @@ export const AuthProvider = ({ children }) => {
                     localStorage.setItem("token", token);
                     localStorage.setItem("username", username);
                     localStorage.setItem("role", resolvedRole);
+
+                    if (resolvedRole === "student") {
+                        sessionStorage.removeItem("teacher-room-access");
+                    } else {
+                        sessionStorage.removeItem("student-room-access");
+                    }
+
                     setUserData({ username, role: resolvedRole });
                     router(redirectTo);
                 }
@@ -125,10 +132,53 @@ export const AuthProvider = ({ children }) => {
         }
     };
 
+    const addRecordingMeta = async ({ meetingCode, durationSec, sizeBytes, fileName }) => {
+        const token = getAuthToken();
+        if (!token) {
+            throw new Error("Login required");
+        }
+
+        try {
+            const request = await client.post("/add_recording", {
+                token,
+                meeting_code: meetingCode,
+                duration_sec: durationSec,
+                size_bytes: sizeBytes,
+                file_name: fileName,
+            });
+
+            return request.data;
+        } catch (error) {
+            throw error;
+        }
+    };
+
+    const getRecordingsByMeetingCode = async (meetingCode) => {
+        const token = getAuthToken();
+        if (!token) {
+            throw new Error("Login required");
+        }
+
+        try {
+            const request = await client.get("/get_recordings", {
+                params: {
+                    token,
+                    meeting_code: meetingCode,
+                },
+            });
+
+            return request.data;
+        } catch (error) {
+            throw error;
+        }
+    };
+
     const logout = () => {
         localStorage.removeItem("token");
         localStorage.removeItem("username");
         localStorage.removeItem("role");
+        sessionStorage.removeItem("student-room-access");
+        sessionStorage.removeItem("teacher-room-access");
         setUserData({ username: "", role: "" });
         router("/");
     };
@@ -138,6 +188,8 @@ export const AuthProvider = ({ children }) => {
         setUserData,
         addToUserHistory,
         validateMeetingRoom,
+        addRecordingMeta,
+        getRecordingsByMeetingCode,
         getHistoryOfUser,
         handleRegister,
         handleLogin,

@@ -2,6 +2,7 @@ import React, { useContext, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import AnalyticsCard from '../components/AnalyticsCard';
 import Leaderboard from '../components/Leaderboard';
+import LearningReels from '../components/LearningReels';
 import Sidebar from '../components/Sidebar';
 import { AuthContext } from '../context/AuthContext';
 
@@ -312,6 +313,10 @@ const StudentDashboard = () => {
                 </article>
               ))}
             </div>
+          </section>
+
+          <section id='reels' className='mt-6'>
+            <LearningReels />
           </section>
         </main>
       </div>

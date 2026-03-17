@@ -47,6 +47,10 @@ app.use(express.urlencoded({limit : "40kb" , extended : true}));
 
 app.use("/api/v1/users" , userRoutes)
 
+app.get("/health", (req, res) => {
+  return res.status(200).json({ status: "ok" });
+});
+
 app.get("/home", (req, res) => {
   return res.json("Heelo bhaiyo");
 });
