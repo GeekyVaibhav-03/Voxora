@@ -43,16 +43,16 @@ const Landing = () => {
 
             <div className='mt-8 flex flex-wrap gap-3'>
               <Link
-                to='/teacher'
+                to='/login/teacher'
                 className='rounded-xl bg-brand-500 px-5 py-3 text-sm font-semibold text-white shadow-soft transition hover:bg-brand-400'
               >
-                Create Class
+                I&apos;m a Teacher
               </Link>
               <Link
-                to='/student'
+                to='/login/student'
                 className='rounded-xl border border-white/20 px-5 py-3 text-sm font-semibold text-slate-100 transition hover:border-brand-300 hover:bg-white/5'
               >
-                Join Class
+                I&apos;m a Student
               </Link>
             </div>
           </div>

@@ -11,7 +11,7 @@ const teacherItems = [
 
 const studentItems = [
   { label: 'My Classes', to: '/student' },
-  { label: 'Join Live', to: '/classroom/live' },
+  { label: 'Join with Code', to: '/student#join-room' },
   { label: 'Leaderboard', to: '/student#leaderboard' },
   { label: 'Rewards', to: '/student#rewards' },
 ];

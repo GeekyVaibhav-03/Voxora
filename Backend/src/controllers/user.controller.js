@@ -102,4 +102,47 @@ const getAllActivity = async (req, res) => {
   }
 };
 
-export { login, register, addToActivity, getAllActivity }
+const validateMeetingRoom = async (req, res) => {
+  const token = req.query?.token;
+  const meetingCode = req.query?.meeting_code;
+
+  if (!token || !meetingCode) {
+    return res.status(httpStatus.BAD_REQUEST).json({
+      message: "token and meeting_code are required",
+      exists: false,
+    });
+  }
+
+  try {
+    const user = await User.findOne({ token });
+
+    if (!user) {
+      return res.status(httpStatus.UNAUTHORIZED).json({ message: "Invalid token", exists: false });
+    }
+
+    const escapedMeetingCode = meetingCode
+      .toString()
+      .trim()
+      .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+    const meetingExists = await Meeting.exists({
+      meetingCode: { $regex: new RegExp(`^${escapedMeetingCode}$`, "i") },
+    });
+
+    if (!meetingExists) {
+      return res.status(httpStatus.NOT_FOUND).json({
+        message: "Meeting room not found",
+        exists: false,
+      });
+    }
+
+    return res.status(httpStatus.OK).json({ exists: true });
+  } catch (e) {
+    return res.status(httpStatus.INTERNAL_SERVER_ERROR).json({
+      message: `Something went wrong ${e}`,
+      exists: false,
+    });
+  }
+};
+
+export { login, register, addToActivity, getAllActivity, validateMeetingRoom }

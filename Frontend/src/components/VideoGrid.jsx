@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 
 const fallbackStudents = [
   { id: 1, name: 'Aarav', speaking: true },
@@ -13,7 +13,41 @@ const VideoGrid = ({
   teacherName = 'Professor Mira',
   sessionTitle = 'AI Powered Physics Live',
   students = fallbackStudents,
+  teacherStream = null,
+  isCameraOn = true,
+  isScreenSharing = false,
+  mediaError = '',
+  transcriptLines = [],
+  interimTranscript = '',
+  transcriptState = 'idle',
+  transcriptError = '',
+  isTranscriptSupported = false,
 }) => {
+  const teacherVideoRef = useRef(null);
+
+  const latestTranscript = interimTranscript || transcriptLines[transcriptLines.length - 1] || '';
+
+  const transcriptStateMap = {
+    listening: { label: 'Listening', className: 'text-emerald-300' },
+    connecting: { label: 'Connecting', className: 'text-amber-300' },
+    reconnecting: { label: 'Reconnecting', className: 'text-amber-300' },
+    blocked: { label: 'Blocked', className: 'text-rose-300' },
+    unsupported: { label: 'Unsupported', className: 'text-rose-300' },
+    error: { label: 'Error', className: 'text-rose-300' },
+    idle: { label: 'Paused', className: 'text-slate-300' },
+  };
+
+  const transcriptMeta = transcriptStateMap[transcriptState] || transcriptStateMap.idle;
+
+  const transcriptText = !isTranscriptSupported
+    ? 'Transcript is not supported in this browser. Use latest Chrome or Edge.'
+    : transcriptError || latestTranscript || 'Start speaking to generate live transcript.';
+
+  useEffect(() => {
+    if (!teacherVideoRef.current) return;
+    teacherVideoRef.current.srcObject = teacherStream || null;
+  }, [teacherStream]);
+
   return (
     <section className='glass-card p-4'>
       <div className='mb-4 flex items-center justify-between'>
@@ -28,15 +62,48 @@ const VideoGrid = ({
 
       <div className='grid gap-3 xl:grid-cols-3'>
         <article className='relative overflow-hidden rounded-2xl border border-white/10 bg-slate-900/80 p-5 xl:col-span-2'>
-          <div className='absolute inset-0 bg-gradient-to-br from-brand-500/15 via-transparent to-cyan-300/10' />
+          <div className='absolute inset-0 overflow-hidden rounded-2xl'>
+            {teacherStream ? (
+              <video
+                ref={teacherVideoRef}
+                autoPlay
+                playsInline
+                muted
+                className='h-full w-full object-cover'
+              />
+            ) : (
+              <div className='grid h-full place-items-center bg-slate-900/90'>
+                <p className='px-5 text-center text-sm text-slate-300'>
+                  {mediaError || (isCameraOn ? 'Waiting for camera stream...' : 'Camera is off')}
+                </p>
+              </div>
+            )}
+            <div className='absolute inset-0 bg-gradient-to-br from-brand-500/20 via-transparent to-cyan-300/15' />
+            <div className='absolute inset-0 bg-gradient-to-t from-slate-950/85 via-transparent to-transparent' />
+          </div>
           <div className='relative z-10 flex h-64 flex-col justify-between sm:h-80'>
             <div className='flex items-center justify-between'>
-              <p className='rounded-full border border-white/15 px-3 py-1 text-xs text-slate-300'>Teacher Cam</p>
-              <p className='text-xs text-slate-400'>AI transcript enabled</p>
+              <p className='rounded-full border border-white/15 bg-slate-950/50 px-3 py-1 text-xs text-slate-300'>
+                {isScreenSharing ? 'Screen Share' : 'Teacher Cam'}
+              </p>
+              <p className='text-xs text-slate-300'>
+                {isScreenSharing ? 'Presenting screen to class' : `Transcript ${transcriptMeta.label}`}
+              </p>
             </div>
             <div>
               <h3 className='font-display text-2xl text-white'>{teacherName}</h3>
               <p className='text-sm text-slate-300'>Explaining chapter with live annotations</p>
+              <div className='mt-3 rounded-xl border border-white/20 bg-slate-950/55 p-3 backdrop-blur'>
+                <div className='mb-1 flex items-center justify-between gap-2'>
+                  <p className='text-[11px] uppercase tracking-[0.18em] text-slate-300'>Live Transcript</p>
+                  <p className={`text-[10px] font-semibold uppercase tracking-[0.15em] ${transcriptMeta.className}`}>
+                    {transcriptMeta.label}
+                  </p>
+                </div>
+                <p className='max-h-14 overflow-hidden text-sm text-slate-100'>
+                  {transcriptText}
+                </p>
+              </div>
             </div>
           </div>
         </article>

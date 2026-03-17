@@ -1,4 +1,6 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import io from 'socket.io-client';
+import server from '../environment';
 
 const seedChat = [
   { id: 1, sender: 'Sara', text: 'Can you repeat the formula for drag force?' },
@@ -11,28 +13,88 @@ const seedAi = [
 
 const reactions = ['Thumbs Up', 'Clap', 'Idea', 'Rocket'];
 
-const ChatPanel = () => {
+const ChatPanel = ({ roomId = 'live', username = 'Learner' }) => {
   const [tab, setTab] = useState('chat');
   const [text, setText] = useState('');
   const [raisedHand, setRaisedHand] = useState(false);
   const [chatMessages, setChatMessages] = useState(seedChat);
   const [aiMessages, setAiMessages] = useState(seedAi);
+  const [connectionState, setConnectionState] = useState('connecting');
+  const socketRef = useRef(null);
+
+  useEffect(() => {
+    setConnectionState('connecting');
+
+    const socket = io(server, {
+      withCredentials: true,
+      transports: ['websocket'],
+    });
+
+    socketRef.current = socket;
+
+    socket.on('connect', () => {
+      setConnectionState('connected');
+      socket.emit('join-call', `classroom:${roomId}`);
+    });
+
+    socket.on('disconnect', () => {
+      setConnectionState('offline');
+    });
+
+    socket.on('connect_error', () => {
+      setConnectionState('offline');
+    });
+
+    socket.on('chat-message', (data, sender) => {
+      setChatMessages((prev) => [
+        ...prev,
+        {
+          id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          sender: sender || 'Peer',
+          text: data,
+        },
+      ]);
+    });
+
+    return () => {
+      socket.disconnect();
+      socketRef.current = null;
+    };
+  }, [roomId]);
 
   const messages = useMemo(
     () => (tab === 'chat' ? chatMessages : aiMessages),
     [tab, chatMessages, aiMessages],
   );
 
+  const statusClass =
+    connectionState === 'connected'
+      ? 'text-emerald-300'
+      : connectionState === 'connecting'
+        ? 'text-amber-300'
+        : 'text-rose-300';
+
+  const statusText =
+    connectionState === 'connected'
+      ? 'Realtime Connected'
+      : connectionState === 'connecting'
+        ? 'Connecting...'
+        : 'Offline Mode';
+
   const submitMessage = () => {
     const value = text.trim();
     if (!value) return;
 
     if (tab === 'chat') {
-      setChatMessages((prev) => [...prev, { id: Date.now(), sender: 'You', text: value }]);
+      if (socketRef.current?.connected) {
+        socketRef.current.emit('chat-message', value, username);
+      } else {
+        setChatMessages((prev) => [...prev, { id: Date.now(), sender: username, text: value }]);
+      }
     } else {
       setAiMessages((prev) => [
         ...prev,
-        { id: Date.now(), sender: 'You', text: value },
+        { id: Date.now(), sender: username, text: value },
         {
           id: Date.now() + 1,
           sender: 'AI Tutor',
@@ -49,6 +111,7 @@ const ChatPanel = () => {
       <div className='border-b border-white/10 p-4'>
         <p className='text-xs uppercase tracking-[0.2em] text-slate-400'>Collaboration Panel</p>
         <h3 className='mt-1 font-display text-lg text-slate-100'>Chat and AI Assistant</h3>
+        <p className={`mt-2 text-xs font-semibold uppercase tracking-[0.16em] ${statusClass}`}>{statusText}</p>
       </div>
 
       <div className='grid grid-cols-2 gap-2 px-4 pt-4'>

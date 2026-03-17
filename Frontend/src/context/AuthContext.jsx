@@ -1,9 +1,7 @@
 import axios from "axios";
 import httpStatus from "http-status";
-import { createContext, useContext, useState } from "react";
+import { createContext, useState } from "react";
 import { useNavigate } from "react-router-dom";
-// import server from "../environment";
-
 
 export const AuthContext = createContext({});
 
@@ -11,91 +9,142 @@ const apiBaseUrl =
     import.meta.env.VITE_API_BASE_URL || "http://localhost:8000/api/v1/users";
 
 const client = axios.create({
-    baseURL: apiBaseUrl
-})
+    baseURL: apiBaseUrl,
+});
 
+const getAuthToken = () => localStorage.getItem("token");
+const getStoredRole = () => localStorage.getItem("role") || "";
 
 export const AuthProvider = ({ children }) => {
-
-    const authContext = useContext(AuthContext);
-
-
-    const [userData, setUserData] = useState(authContext);
-
-
     const router = useNavigate();
+    const [userData, setUserData] = useState({
+        username: localStorage.getItem("username") || "",
+        role: getStoredRole(),
+    });
 
     const handleRegister = async (name, username, password) => {
         try {
-            let request = await client.post("/register", {
-                name: name,
-                username: username,
-                password: password
-            })
-
+            const request = await client.post("/register", {
+                name,
+                username,
+                password,
+            });
 
             if (request.status === httpStatus.CREATED) {
                 return request.data.message;
             }
-        } catch (err) {
-            throw err;
-        }
-    }
 
-    const handleLogin = async (username, password) => {
+            return "Registration completed";
+        } catch (error) {
+            throw error;
+        }
+    };
+
+    const handleLogin = async (
+        username,
+        password,
+        redirectTo = "/student",
+        role = "student"
+    ) => {
         try {
-            let request = await client.post("/login", {
-                username: username,
-                password: password
+            const request = await client.post("/login", {
+                username,
+                password,
             });
 
             if (request.status === httpStatus.OK) {
                 const token = request.data?.token ?? request.data?.message;
+
                 if (token) {
+                    const resolvedRole =
+                        role || (redirectTo === "/teacher" ? "teacher" : "student");
                     localStorage.setItem("token", token);
+                    localStorage.setItem("username", username);
+                    localStorage.setItem("role", resolvedRole);
+                    setUserData({ username, role: resolvedRole });
+                    router(redirectTo);
                 }
-                router("/home")
             }
-        } catch (err) {
-            throw err;
+
+            return request.data;
+        } catch (error) {
+            throw error;
         }
-    }
+    };
 
     const getHistoryOfUser = async () => {
-        try {
-            let request = await client.get("/get_all_activity", {
-                params: {
-                    token: localStorage.getItem("token")
-                }
-            });
-            return request.data
-        } catch
-         (err) {
-            throw err;
+        const token = getAuthToken();
+        if (!token) {
+            throw new Error("Login required");
         }
-    }
+
+        try {
+            const request = await client.get("/get_all_activity", {
+                params: { token },
+            });
+            return request.data;
+        } catch (error) {
+            throw error;
+        }
+    };
 
     const addToUserHistory = async (meetingCode) => {
-        try {
-            let request = await client.post("/add_to_activity", {
-                token: localStorage.getItem("token"),
-                meeting_code: meetingCode
-            });
-            return request
-        } catch (e) {
-            throw e;
+        const token = getAuthToken();
+        if (!token) {
+            throw new Error("Login required");
         }
-    }
 
+        try {
+            const request = await client.post("/add_to_activity", {
+                token,
+                meeting_code: meetingCode,
+            });
+            return request.data;
+        } catch (error) {
+            throw error;
+        }
+    };
+
+    const validateMeetingRoom = async (meetingCode) => {
+        const token = getAuthToken();
+        if (!token) {
+            throw new Error("Login required");
+        }
+
+        try {
+            const request = await client.get("/validate_room", {
+                params: {
+                    token,
+                    meeting_code: meetingCode,
+                },
+            });
+
+            return request.data?.exists === true;
+        } catch (error) {
+            throw error;
+        }
+    };
+
+    const logout = () => {
+        localStorage.removeItem("token");
+        localStorage.removeItem("username");
+        localStorage.removeItem("role");
+        setUserData({ username: "", role: "" });
+        router("/");
+    };
 
     const data = {
-        userData, setUserData, addToUserHistory, getHistoryOfUser, handleRegister, handleLogin
-    }
+        userData,
+        setUserData,
+        addToUserHistory,
+        validateMeetingRoom,
+        getHistoryOfUser,
+        handleRegister,
+        handleLogin,
+        logout,
+        userRole: userData.role,
+        isAuthenticated: Boolean(getAuthToken()),
+    };
 
-    return (
-        <AuthContext.Provider value={data}>
-            {children}
-        </AuthContext.Provider>
-    )
-
-}
+    return <AuthContext.Provider value={data}>{children}</AuthContext.Provider>;
+};
