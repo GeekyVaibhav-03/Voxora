@@ -19,6 +19,14 @@ const TeacherLogin = () => {
     setSuccess('');
   };
 
+  const getFriendlyErrorMessage = (err) => {
+    if (!err?.response) {
+      return 'Unable to reach server. Please start backend on port 8000 and try again.';
+    }
+
+    return err?.response?.data?.message || 'Something went wrong. Please try again.';
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
@@ -37,7 +45,7 @@ const TeacherLogin = () => {
         setPassword('');
       }
     } catch (err) {
-      setError(err?.response?.data?.message || 'Something went wrong. Please try again.');
+      setError(getFriendlyErrorMessage(err));
     } finally {
       setLoading(false);
     }

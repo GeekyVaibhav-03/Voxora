@@ -15,12 +15,33 @@ const corsOrigins = rawCorsOrigins
   .split(",")
   .map((origin) => origin.trim())
   .filter(Boolean);
-const corsOriginConfig = corsOrigins.includes("*") ? true : corsOrigins;
+const allowAnyOrigin = corsOrigins.includes("*");
+const isLocalhostOrigin = (origin) => /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin);
 
-connectToSocket(server, corsOriginConfig);
+const isAllowedOrigin = (origin) => {
+  if (!origin) return true;
+  if (allowAnyOrigin) return true;
+  if (corsOrigins.includes(origin)) return true;
+  if (isLocalhostOrigin(origin)) return true;
+  return false;
+};
+
+connectToSocket(server, allowAnyOrigin ? true : [...corsOrigins, /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i]);
 
 app.set("port", process.env.PORT || 8000);
-app.use(cors({ origin: corsOriginConfig, credentials: true }));
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (isAllowedOrigin(origin)) {
+        callback(null, true);
+        return;
+      }
+
+      callback(new Error("Not allowed by CORS"));
+    },
+    credentials: true,
+  })
+);
 app.use(express.json({limit: "40kb"}));
 app.use(express.urlencoded({limit : "40kb" , extended : true}));
 

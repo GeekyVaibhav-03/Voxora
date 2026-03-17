@@ -93,25 +93,48 @@ const Classroom = () => {
 
     let mounted = true;
 
+    const applyLocalStream = (stream) => {
+      localStreamRef.current = stream;
+      setLocalStream(stream);
+      setMediaReady(true);
+    };
+
     const initializeMedia = async () => {
       try {
         if (!navigator.mediaDevices?.getUserMedia) {
           throw new Error('Camera access is not supported in this browser.');
         }
 
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: true,
-          audio: true,
-        });
+        let stream = null;
+        let audioAvailable = true;
+
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: true,
+          });
+        } catch {
+          // If mic permission is blocked, continue with camera-only mode.
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: false,
+          });
+          audioAvailable = false;
+        }
 
         if (!mounted) {
           stopTracks(stream);
           return;
         }
 
-        localStreamRef.current = stream;
-        setLocalStream(stream);
-        setMediaReady(true);
+        applyLocalStream(stream);
+
+        if (!audioAvailable) {
+          setMicOn(false);
+          setMediaError('Microphone permission is blocked. Camera is active in video-only mode.');
+          return;
+        }
+
         setMediaError('');
       } catch (error) {
         if (!mounted) return;
