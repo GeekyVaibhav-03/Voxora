@@ -1,4 +1,5 @@
 import { Server } from "socket.io";
+import { registerLearningSocketHandlers } from "../sockets/learning.socket.js";
 
 let connections = {};
 let messages = {};
@@ -15,10 +16,15 @@ export const connectToSocket = (server, corsOrigin = true) => {
 
   io.on("connection", (socket) => {
     socket.on("join-call", (path) => {
+      socket.data.path = path;
+
       if (connections[path] === undefined) {
         connections[path] = [];
       }
-      connections[path].push(socket.id);
+
+      if (!connections[path].includes(socket.id)) {
+        connections[path].push(socket.id);
+      }
 
       timeOnline[socket.id] = new Date();
 
@@ -41,6 +47,8 @@ export const connectToSocket = (server, corsOrigin = true) => {
         }
       }
     });
+
+    registerLearningSocketHandlers(io, socket);
 
     socket.on("signal", (toId, message) => {
       io.to(toId).emit("signal", socket.id, message);

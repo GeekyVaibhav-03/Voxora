@@ -14,6 +14,9 @@ const VideoGrid = ({
   sessionTitle = 'AI Powered Physics Live',
   students = fallbackStudents,
   teacherStream = null,
+  studentStream = null,
+  studentName = 'Learner',
+  viewerRole = 'teacher',
   isCameraOn = true,
   isScreenSharing = false,
   mediaError = '',
@@ -24,6 +27,7 @@ const VideoGrid = ({
   isTranscriptSupported = false,
 }) => {
   const teacherVideoRef = useRef(null);
+  const studentVideoRef = useRef(null);
 
   const latestTranscript = interimTranscript || transcriptLines[transcriptLines.length - 1] || '';
 
@@ -43,10 +47,25 @@ const VideoGrid = ({
     ? 'Transcript is not supported in this browser. Use latest Chrome or Edge.'
     : transcriptError || latestTranscript || 'Start speaking to generate live transcript.';
 
+  const waitingMainFeedMessage = viewerRole === 'student'
+    ? 'Waiting for teacher video stream. Your camera is shown in student tiles.'
+    : isCameraOn
+      ? 'Waiting for camera stream...'
+      : 'Camera is off';
+
+  const participantTiles = studentStream
+    ? [{ id: 'self', name: studentName, speaking: true, isSelf: true }, ...students.slice(0, 5)]
+    : students;
+
   useEffect(() => {
     if (!teacherVideoRef.current) return;
     teacherVideoRef.current.srcObject = teacherStream || null;
   }, [teacherStream]);
+
+  useEffect(() => {
+    if (!studentVideoRef.current) return;
+    studentVideoRef.current.srcObject = studentStream || null;
+  }, [studentStream]);
 
   return (
     <section className='glass-card p-4'>
@@ -74,7 +93,7 @@ const VideoGrid = ({
             ) : (
               <div className='grid h-full place-items-center bg-slate-900/90'>
                 <p className='px-5 text-center text-sm text-slate-300'>
-                  {mediaError || (isCameraOn ? 'Waiting for camera stream...' : 'Camera is off')}
+                  {mediaError || waitingMainFeedMessage}
                 </p>
               </div>
             )}
@@ -84,7 +103,7 @@ const VideoGrid = ({
           <div className='relative z-10 flex h-64 flex-col justify-between sm:h-80'>
             <div className='flex items-center justify-between'>
               <p className='rounded-full border border-white/15 bg-slate-950/50 px-3 py-1 text-xs text-slate-300'>
-                {isScreenSharing ? 'Screen Share' : 'Teacher Cam'}
+                {isScreenSharing ? 'Screen Share' : 'Teacher Feed'}
               </p>
               <p className='text-xs text-slate-300'>
                 {isScreenSharing ? 'Presenting screen to class' : `Transcript ${transcriptMeta.label}`}
@@ -109,20 +128,49 @@ const VideoGrid = ({
         </article>
 
         <div className='grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-2'>
-          {students.map((student) => (
-            <article
-              key={student.id}
-              className='flex h-32 flex-col justify-between rounded-2xl border border-white/10 bg-slate-900/70 p-3'
-            >
-              <div className='h-12 w-12 rounded-full bg-gradient-to-br from-brand-400 to-cyan-300' />
-              <div>
-                <p className='text-sm font-semibold text-slate-100'>{student.name}</p>
-                <p className={`text-xs ${student.speaking ? 'text-emerald-300' : 'text-slate-400'}`}>
-                  {student.speaking ? 'Speaking' : 'Listening'}
-                </p>
-              </div>
-            </article>
-          ))}
+          {participantTiles.map((student) => {
+            if (student.isSelf) {
+              return (
+                <article
+                  key={student.id}
+                  className='flex h-32 flex-col justify-between rounded-2xl border border-brand-300/30 bg-slate-900/70 p-3'
+                >
+                  <div className='h-12 w-12 overflow-hidden rounded-full border border-brand-300/40 bg-slate-800'>
+                    {studentStream ? (
+                      <video
+                        ref={studentVideoRef}
+                        autoPlay
+                        playsInline
+                        muted
+                        className='h-full w-full object-cover'
+                      />
+                    ) : (
+                      <div className='h-full w-full bg-gradient-to-br from-brand-400 to-cyan-300' />
+                    )}
+                  </div>
+                  <div>
+                    <p className='text-sm font-semibold text-slate-100'>{student.name} (You)</p>
+                    <p className='text-xs text-brand-200'>Student Camera</p>
+                  </div>
+                </article>
+              );
+            }
+
+            return (
+              <article
+                key={student.id}
+                className='flex h-32 flex-col justify-between rounded-2xl border border-white/10 bg-slate-900/70 p-3'
+              >
+                <div className='h-12 w-12 rounded-full bg-gradient-to-br from-brand-400 to-cyan-300' />
+                <div>
+                  <p className='text-sm font-semibold text-slate-100'>{student.name}</p>
+                  <p className={`text-xs ${student.speaking ? 'text-emerald-300' : 'text-slate-400'}`}>
+                    {student.speaking ? 'Speaking' : 'Listening'}
+                  </p>
+                </div>
+              </article>
+            );
+          })}
         </div>
       </div>
     </section>

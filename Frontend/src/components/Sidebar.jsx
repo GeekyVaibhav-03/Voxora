@@ -2,11 +2,10 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 
 const teacherItems = [
-  { label: 'Overview', to: '/teacher' },
-  { label: 'Live Classroom', to: '/classroom/live' },
+  { label: 'Join with Code', to: '/teacher#sessions' },
   { label: 'Sessions', to: '/teacher#sessions' },
   { label: 'AI Summary', to: '/teacher#summary' },
-  { label: 'Analytics', to: '/teacher#analytics' },
+  { label: 'Analytics', to: '/teacher#attendance-trend' },
 ];
 
 const studentItems = [
