@@ -3,10 +3,10 @@ import { Link } from 'react-router-dom';
 
 const Navbar = ({
   title = 'Voxora Classroom AI',
-  primaryLabel = 'Create Class',
-  primaryTo = '/teacher',
-  secondaryLabel = 'Join Class',
-  secondaryTo = '/student',
+  primaryLabel = 'Teacher Login',
+  primaryTo = '/login/teacher',
+  secondaryLabel = 'Student Login',
+  secondaryTo = '/login/student',
   showLinks = true,
 }) => {
   return (
